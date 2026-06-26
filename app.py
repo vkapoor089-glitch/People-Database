@@ -1,4 +1,4 @@
-import streamlit as st
+code = """import streamlit as st
 import google.generativeai as genai
 import pypdf
 import json
@@ -54,9 +54,13 @@ with tab1:
                         # Call Gemini to parse into strict structured JSON
                         model = genai.GenerativeModel('gemini-1.5-flash')
                         
-                        prompt = f"""
+                        prompt = f\"\"\"
                         You are an expert IT technical recruiter. Parse the following resume text and extract the information into a valid JSON object.
-                        Do not include any markdown formatting wrappers (like ```json). Return ONLY the raw JSON string.
+                        Do not include any markdown formatting wrappers (like ```
+```text?code_stdout&code_event_index=2
+SyntaxError found: unterminated string literal (detected at line 52) (app.py, line 52)
+
+```json). Return ONLY the raw JSON string.
                         
                         Required JSON structure:
                         {{
@@ -68,7 +72,7 @@ with tab1:
 
                         Resume text to parse:
                         {resume_text}
-                        """
+                        \"\"\"
                         
                         response = model.generate_content(prompt)
                         
@@ -110,4 +114,106 @@ with tab2:
             num_rows="dynamic",
             column_config={
                 "name": st.column_config.TextColumn("Candidate Name", disabled=True),
-                "expected_budget_lpa": st.column_config.
+                "expected_budget_lpa": st.column_config.NumberColumn("Expected Budget (LPA)", format="%.2f"),
+                "current_location": st.column_config.TextColumn("Current Location"),
+                "total_experience_years": st.column_config.NumberColumn("Exp (Years)", disabled=True),
+                "keyskills": st.column_config.ListColumn("Extracted Keyskills", disabled=True),
+                "top_projects": st.column_config.ListColumn("Key Projects", disabled=True)
+            },
+            key="db_editor"
+        )
+        
+        # Save modifications back to session state
+        if st.button("Save Database Changes"):
+            st.session_state.candidate_db = edited_df.to_dict(orient="records")
+            st.toast("Database updated successfully!", icon="💾")
+
+# ==========================================
+# TAB 3: JOB DESCRIPTION MATCHING
+# ==========================================
+with tab3:
+    st.header("Smart Match Job Description")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        max_budget = st.number_input("Max Budget Constraint (LPA)", min_value=0.0, value=15.0)
+    with col2:
+        target_location = st.text_input("Target Location Filter (e.g., Delhi, Noida, Remote)", value="")
+        
+    jd_text = st.text_area("Paste the Job Description (JD) here", height=250)
+    
+    if st.button("Run AI Sourcing Matcher") and jd_text:
+        if not st.session_state.candidate_db:
+            st.warning("Your database is empty. Please upload resumes first.")
+        elif not api_key:
+            st.error("API key is missing.")
+        else:
+            with st.spinner("Analyzing profile matches using semantic layer..."):
+                # 1. Apply operational hard filters first
+                filtered_candidates = []
+                for c in st.session_state.candidate_db:
+                    # Budget Check
+                    if c['expected_budget_lpa'] > max_budget and c['expected_budget_lpa'] != 0.0:
+                        continue
+                    # Simple Location Check (case-insensitive string match)
+                    if target_location and target_location.lower() not in str(c['current_location']).lower():
+                        continue
+                    filtered_candidates.append(c)
+                
+                if not filtered_candidates:
+                    st.error("No candidates passed your initial Budget or Location filter guardrails.")
+                else:
+                    try:
+                        # 2. Use Gemini to contextually rank the candidates who passed the hard filters
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        match_prompt = f\"\"\"
+                        You are an advanced recruitment matching engine. Rank the following candidates against the provided Job Description (JD).
+                        Assign a match percentage (0 to 100) based on skill overlap, project relevance, and years of experience depth.
+                        Provide a brief 1-sentence technical justification for your score.
+                        Return ONLY a raw JSON array matching this structure, sorted from highest score to lowest:
+                        [
+                            {{
+                                "name": "Candidate Name",
+                                "match_score": 85,
+                                "justification": "Candidate has strong React experience matching the frontend stack required."
+                            }}
+                        ]
+
+                        Job Description:
+                        {jd_text}
+
+                        Candidates Data Pool:
+                        {json.dumps(filtered_candidates)}
+                        \"\"\"
+                        
+                        response = model.generate_content(match_prompt)
+                        clean_match_json = response.text.strip().replace("```json", "").replace("```", "")
+                        match_results = json.loads(clean_match_json)
+                        
+                        # Display Results Matrix
+                        st.subheader("🎯 Best Fit Matches Found")
+                        for rank, match in enumerate(match_results, 1):
+                            score = match['match_score']
+                            
+                            # Visual health cues based on match strength
+                            if score >= 80:
+                                score_color = "🟢"
+                            elif score >= 50:
+                                score_color = "🟡"
+                            else:
+                                score_color = "🔴"
+                                
+                            with st.container(border=True):
+                                st.markdown(f"### {score_color} {rank}. {match['name']} — **{score}% Match**")
+                                st.write(f"**AI Evaluation:** {match['justification']}")
+                                
+                    except Exception as e:
+                        st.error(f"Failed to calculate semantic matches: {str(e)}")
+"""
+
+try:
+    compile(code, "app.py", "exec")
+    print("No syntax error found in code literal!")
+except SyntaxError as e:
+    print(f"SyntaxError found: {e}")
