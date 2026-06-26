@@ -1,4 +1,4 @@
-import streamlit as str
+import streamlit as st
 import google.generativeai as genai
 import pypdf
 import json
