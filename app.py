@@ -9,17 +9,27 @@ import pandas as pd
 st.set_page_config(page_title="IT Sourcing Engine", page_icon="💼", layout="wide")
 st.title("🤖 Intelligent IT Sourcing & Matching Engine")
 
+st.sidebar.header("🔑 Configuration")
+
 # 2. Check for AI API Key Configuration
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
+    st.sidebar.success("Gemini API Key loaded from Secrets")
 else:
-    st.sidebar.header("🔑 Configuration")
     api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
     if api_key:
         genai.configure(api_key=api_key)
     else:
         st.sidebar.warning("Please enter your Gemini API key to activate AI features.")
+
+# Future-proofing: Dropdown to switch models dynamically if Google updates strings
+selected_model = st.sidebar.selectbox(
+    "🤖 Gemini Model Version",
+    ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+    index=0,
+    help="If you encounter a 404 error, switch to a newer version like gemini-2.5-flash."
+)
 
 # 3. Detect and Initialize Database Strategy (GSheets vs. Session State Fallback)
 use_gsheets = False
@@ -90,8 +100,8 @@ with tab1:
                             if text:
                                 resume_text += text + "\n"
                         
-                        # Calling the model using standard stable initialization string
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        # Utilizing the model selected in the sidebar configuration
+                        model = genai.GenerativeModel(selected_model)
                         prompt = f"""
                         You are an expert IT technical recruiter. Parse the following resume text and extract the information into a valid JSON object.
                         Do not include any markdown formatting wrappers (like ```json). Return ONLY the raw JSON string.
@@ -200,43 +210,4 @@ with tab3:
                     filtered_candidates.append(c)
                 
                 if not filtered_candidates:
-                    st.error("No database files passed your operational location or cost parameter ceiling.")
-                else:
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        match_prompt = f"""
-                        You are an advanced recruitment matching engine. Rank the following candidates against the provided Job Description (JD).
-                        Assign a match percentage (0 to 100) based on skill overlap, project relevance, and experience alignment.
-                        Provide a brief 1-sentence technical justification for your score.
-                        Return ONLY a raw JSON array matching this structure, sorted from highest score to lowest:
-                        [
-                            {{
-                                "name": "Candidate Name",
-                                "match_score": 85,
-                                "justification": "Candidate has strong alignment with the technical stack parameters required."
-                            }}
-                        ]
-
-                        Job Description:
-                        {jd_text}
-
-                        Candidates Data Pool:
-                        {json.dumps(filtered_candidates)}
-                        """
-                        
-                        response = model.generate_content(match_prompt)
-                        clean_match_json = response.text.strip().replace("```json", "").replace("```", "")
-                        match_results = json.loads(clean_match_json)
-                        
-                        st.subheader("🎯 Best Fit Matches Found")
-                        for rank, match in enumerate(match_results, 1):
-                            score = match['match_score']
-                            score_color = "🟢" if score >= 80 else ("🟡" if score >= 50 else "🔴")
-                                
-                            with st.container(border=True):
-                                st.markdown(f"### {score_color} {rank}. {match['name']} — **{score}% Match**")
-                                st.write(f"**AI Evaluation:** {match['justification']}")
-                                
-                    except Exception as e:
-                        st.error(f"Failed to calculate semantic matching index: {str(e)}")
+                    st.error
