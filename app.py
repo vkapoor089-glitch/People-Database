@@ -1,4 +1,4 @@
-code = """import streamlit as st
+import streamlit as st
 import google.generativeai as genai
 import pypdf
 import json
@@ -54,13 +54,9 @@ with tab1:
                         # Call Gemini to parse into strict structured JSON
                         model = genai.GenerativeModel('gemini-1.5-flash')
                         
-                        prompt = f\"\"\"
+                        prompt = f"""
                         You are an expert IT technical recruiter. Parse the following resume text and extract the information into a valid JSON object.
-                        Do not include any markdown formatting wrappers (like ```
-```text?code_stdout&code_event_index=2
-SyntaxError found: unterminated string literal (detected at line 52) (app.py, line 52)
-
-```json). Return ONLY the raw JSON string.
+                        Do not include any markdown formatting wrappers (like ```json). Return ONLY the raw JSON string.
                         
                         Required JSON structure:
                         {{
@@ -72,7 +68,7 @@ SyntaxError found: unterminated string literal (detected at line 52) (app.py, li
 
                         Resume text to parse:
                         {resume_text}
-                        \"\"\"
+                        """
                         
                         response = model.generate_content(prompt)
                         
@@ -167,7 +163,7 @@ with tab3:
                         # 2. Use Gemini to contextually rank the candidates who passed the hard filters
                         model = genai.GenerativeModel('gemini-1.5-flash')
                         
-                        match_prompt = f\"\"\"
+                        match_prompt = f"""
                         You are an advanced recruitment matching engine. Rank the following candidates against the provided Job Description (JD).
                         Assign a match percentage (0 to 100) based on skill overlap, project relevance, and years of experience depth.
                         Provide a brief 1-sentence technical justification for your score.
@@ -185,7 +181,7 @@ with tab3:
 
                         Candidates Data Pool:
                         {json.dumps(filtered_candidates)}
-                        \"\"\"
+                        """
                         
                         response = model.generate_content(match_prompt)
                         clean_match_json = response.text.strip().replace("```json", "").replace("```", "")
@@ -210,10 +206,3 @@ with tab3:
                                 
                     except Exception as e:
                         st.error(f"Failed to calculate semantic matches: {str(e)}")
-"""
-
-try:
-    compile(code, "app.py", "exec")
-    print("No syntax error found in code literal!")
-except SyntaxError as e:
-    print(f"SyntaxError found: {e}")
