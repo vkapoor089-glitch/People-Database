@@ -32,17 +32,17 @@ selected_model = st.sidebar.selectbox(
 )
 
 # 3. Detect and Initialize Database Strategy (Directly attempting connection)
+# 3. Detect and Initialize Database Strategy
 use_gsheets = False
 try:
-    # Directly attempting connection eliminates the brittle st.secrets check
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Perform a quick read check to ensure the credentials are valid
     df_check = conn.read(ttl=0)
     use_gsheets = True
     st.sidebar.success("🔒 Connected to Google Sheets Live Database")
 except Exception as conn_err:
-    # Safely falls back to local session state if credentials are empty or invalid
     use_gsheets = False
+    # This line will now print the exact reason for the failure in your sidebar
+    st.sidebar.warning(f"⚠️ GSheets Link Pending: {str(conn_err)}")
 
 if not use_gsheets:
     st.info("ℹ️ Running on local temporary memory. Set up 'connections.gsheets' in Streamlit Secrets to persist data to Google Sheets permanently.")
