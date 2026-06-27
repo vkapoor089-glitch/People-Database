@@ -1,5 +1,1 @@
-streamlit>=1.30.0
-st-gsheets-connection
-google-generativeai
-pandas
 pypdf
