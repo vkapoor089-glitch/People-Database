@@ -23,7 +23,7 @@ else:
     else:
         st.sidebar.warning("Please enter your Gemini API key to activate AI features.")
 
-# Future-proofing: Dropdown to switch models dynamically if Google updates strings
+# Dropdown to switch models dynamically
 selected_model = st.sidebar.selectbox(
     "🤖 Gemini Model Version",
     ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
@@ -31,15 +31,18 @@ selected_model = st.sidebar.selectbox(
     help="If you encounter a 404 error, switch to a newer version like gemini-2.5-flash."
 )
 
-# 3. Detect and Initialize Database Strategy (GSheets vs. Session State Fallback)
+# 3. Detect and Initialize Database Strategy (Directly attempting connection)
 use_gsheets = False
-if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        use_gsheets = True
-        st.sidebar.success("🔒 Connected to Google Sheets Live Database")
-    except Exception as conn_err:
-        st.sidebar.error(f"Failed to bind Google Sheet: {str(conn_err)}")
+try:
+    # Directly attempting connection eliminates the brittle st.secrets check
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Perform a quick read check to ensure the credentials are valid
+    df_check = conn.read(ttl=0)
+    use_gsheets = True
+    st.sidebar.success("🔒 Connected to Google Sheets Live Database")
+except Exception as conn_err:
+    # Safely falls back to local session state if credentials are empty or invalid
+    use_gsheets = False
 
 if not use_gsheets:
     st.info("ℹ️ Running on local temporary memory. Set up 'connections.gsheets' in Streamlit Secrets to persist data to Google Sheets permanently.")
@@ -100,7 +103,6 @@ with tab1:
                             if text:
                                 resume_text += text + "\n"
                         
-                        # Utilizing the model selected in the sidebar configuration
                         model = genai.GenerativeModel(selected_model)
                         prompt = f"""
                         You are an expert IT technical recruiter. Parse the following resume text and extract the information into a valid JSON object.
@@ -210,4 +212,29 @@ with tab3:
                     filtered_candidates.append(c)
                 
                 if not filtered_candidates:
-                    st.error
+                    st.error("No candidates found matching the target budget and location filters.")
+                else:
+                    try:
+                        # Call Gemini to intelligently map the filtered candidate profiles to the JD
+                        model = genai.GenerativeModel(selected_model)
+                        match_prompt = f"""
+                        You are an expert IT technical recruiter. Match and rank the following filtered candidate records against the provided Job Description (JD).
+                        
+                        Job Description:
+                        {jd_text}
+                        
+                        Filtered Candidates Pool:
+                        {json.dumps(filtered_candidates, indent=2)}
+                        
+                        Output an analytical review. For each candidate, provide:
+                        1. Match Suitability Tier (Strong / Moderate / Weak Match)
+                        2. Key Core Alignment (which skills match the JD)
+                        3. Gaps Identified (missing frameworks, tools, or experience gaps)
+                        4. Brief Recruitment Verdict
+                        """
+                        
+                        response = model.generate_content(match_prompt)
+                        st.success("🎯 AI Sourcing Match Complete!")
+                        st.markdown(response.text)
+                    except Exception as e:
+                        st.error(f"AI matching pipeline error: {str(e)}")
