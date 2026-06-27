@@ -2,25 +2,25 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import google.generativeai as genai
+import json
 
 # 1. Page Configuration
 st.set_page_config(
-    page_title="Sourcing Database & AI Assistant",
-    page_icon="📦",
+    page_title="Talent Sourcing & CV Analytics Platform",
+    page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📦 Sourcing Database & AI Assistant")
+st.title("💼 Talent Sourcing & CV Analytics Platform")
 st.markdown("---")
 
 # 2. Initialize Gemini AI Engine
 if "GEMINI_API_KEY" in st.secrets:
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # Using the recommended standard model for general text tasks
         ai_model = genai.GenerativeModel('gemini-1.5-flash')
-        st.sidebar.success("🤖 Gemini AI Engine Active")
+        st.sidebar.success("🤖 Gemini AI Parsing Engine Active")
     except Exception as ai_err:
         st.sidebar.error(f"❌ Gemini Initialization Failed: {str(ai_err)}")
         ai_model = None
@@ -28,142 +28,244 @@ else:
     st.sidebar.warning("⚠️ GEMINI_API_KEY missing from Secrets.")
     ai_model = None
 
-# 3. Detect and Initialize Database Strategy
+# 3. Initialize Form State Variables for Seamless Pre-filling
+state_keys = {
+    "c_name": "",
+    "c_role": "",
+    "c_location": "",
+    "c_budget": "",
+    "c_email": "",
+    "c_skills": "",
+    "c_summary": ""
+}
+for key, default_val in state_keys.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
+# 4. Detect and Initialize Database Strategy
 use_gsheets = False
 conn = None
 df = None
 
-# Define a strict column schema to keep data uniform
-DB_COLUMNS = ["Vendor Name", "Category", "Contact Person", "Email", "Lead Time (Days)", "Notes"]
+DB_COLUMNS = ["Candidate Name", "Role/Category", "Location", "Budget", "Email", "Key Skills", "AI Summary"]
 
 try:
-    # Direct invocation bypassing proxy checks
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Read the data sheet (clearing cache with ttl=0 to ensure real-time accuracy during testing)
     df = conn.read(ttl=0)
     use_gsheets = True
-    st.sidebar.success("IN 🔒 Connected to Google Sheets Live Database")
+    st.sidebar.success("🔒 Connected to Live Candidates Database")
 except Exception as conn_err:
     use_gsheets = False
-    st.sidebar.error(f"❌ Google Sheets Connection Failed: {str(conn_err)}")
+    st.sidebar.error(f"❌ Live Sheets Connection Failed: {str(conn_err)}")
     
-    # Standard fallback to local session state memory
-    if 'local_db' not in st.session_state:
-        st.session_state.local_db = pd.DataFrame(columns=DB_COLUMNS)
-    df = st.session_state.local_db
+    if 'candidate_db' not in st.session_state:
+        st.session_state.candidate_db = pd.DataFrame(columns=DB_COLUMNS)
+    df = st.session_state.candidate_db
 
 if not use_gsheets:
     st.info("ℹ️ Running on local temporary memory. Set up 'connections.gsheets' in Streamlit Secrets to persist data permanently.")
 
-# 4. Data Normalization & Cleaning
+# Data Normalization
 if df is None or df.empty:
     df = pd.DataFrame(columns=DB_COLUMNS)
 else:
-    # Force alignment with the baseline schema to protect against layout drift
     for col in DB_COLUMNS:
         if col not in df.columns:
             df[col] = ""
     df = df[DB_COLUMNS]
 
-# 5. Application Interface Layout (Tabs)
-tab_view, tab_add, tab_ai = st.tabs(["🗂️ View & Search Database", "➕ Add New Entry", "🤖 AI Sourcing Assistant"])
+# 5. UI Layout Tabs
+tab_view, tab_parse, tab_ai = st.tabs(["🗂️ Candidate Database", "🧬 CV Parsing & Manual Input", "🤖 AI Talent Assistant"])
 
-# --- TAB 1: VIEW & SEARCH ---
+# --- TAB 1: VIEW & FILTER DATABASE ---
 with tab_view:
-    st.subheader("Current Database Records")
+    st.subheader("Current Candidate Pool")
     
-    # Search and Filter Mechanics
-    search_query = st.text_input("🔍 Quick Search by Vendor Name or Category:", "")
-    
+    # Active Search and Filters
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        search_role = st.text_input("🔍 Filter by Role / Skill:", "")
+    with col_f2:
+        search_loc = st.text_input("📍 Filter by Location:", "")
+    with col_f3:
+        search_budget = st.text_input("💰 Filter by Budget / CTC:", "")
+        
     if not df.empty:
         filtered_df = df.copy()
-        if search_query:
+        if search_role:
             filtered_df = filtered_df[
-                filtered_df['Vendor Name'].astype(str).str.contains(search_query, case=False, na=False) |
-                filtered_df['Category'].astype(str).str.contains(search_query, case=False, na=False)
+                filtered_df['Role/Category'].astype(str).str.contains(search_role, case=False, na=False) |
+                filtered_df['Key Skills'].astype(str).str.contains(search_role, case=False, na=False)
             ]
-        
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-        st.metric(label="Total Tracked Vendors", value=len(filtered_df))
-    else:
-        st.warning("The database is currently empty. Head over to the 'Add New Entry' tab to get started.")
-
-# --- TAB 2: ADD NEW ENTRY ---
-with tab_add:
-    st.subheader("Register a New Vendor Source")
-    
-    with st.form(key="vendor_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            vendor_name = st.text_input("Vendor Name *")
-            category = st.text_input("Category / Component Class *")
-            contact_person = st.text_input("Contact Person Name")
-        
-        with col2:
-            email = st.text_input("Contact Email")
-            lead_time = st.number_input("Est. Lead Time (Days)", min_value=0, max_value=365, step=1)
-            notes = st.text_area("Operational Notes / Capacity Details")
+        if search_loc:
+            filtered_df = filtered_df[filtered_df['Location'].astype(str).str.contains(search_loc, case=False, na=False)]
+        if search_budget:
+            filtered_df = filtered_df[filtered_df['Budget'].astype(str).str.contains(search_budget, case=False, na=False)]
             
-        submit_btn = st.form_submit_button(label="Commit Entry to Database")
-        
-        if submit_btn:
-            if not vendor_name or not category:
-                st.error("Submission failed: 'Vendor Name' and 'Category' are mandatory fields.")
-            else:
-                # Create a uniform dictionary matching our core schema
-                new_row = {
-                    "Vendor Name": vendor_name.strip(),
-                    "Category": category.strip(),
-                    "Contact Person": contact_person.strip(),
-                    "Email": email.strip(),
-                    "Lead Time (Days)": int(lead_time),
-                    "Notes": notes.strip()
-                }
-                
-                # Append data row cleanly to the in-memory dataframe
-                new_entry_df = pd.DataFrame([new_row])
-                updated_df = pd.concat([df, new_entry_df], ignore_index=True)
-                
-                # Execution writeback route selection
-                if use_gsheets and conn is not None:
-                    try:
-                        conn.update(data=updated_df)
-                        st.success(f"🚀 Success! '{vendor_name}' safely synchronized with Google Sheets.")
-                        st.rerun()
-                    except Exception as write_err:
-                        st.error(f"Failed to synchronize live sheet: {str(write_err)}")
-                else:
-                    st.session_state.local_db = updated_df
-                    st.success(f"💾 Entry stored locally. '{vendor_name}' will remain available for this active browser session.")
-                    st.rerun()
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        st.metric(label="Total Sourced Candidates", value=len(filtered_df))
+    else:
+        st.warning("The talent database is currently empty. Extract or input profiles in the next tab.")
 
-# --- TAB 3: AI SOURCING ASSISTANT ---
+# --- TAB 2: CV PARSING & MANUAL ENTRY ---
+with tab_parse:
+    st.subheader("Profile Ingestion Portal")
+    
+    st.markdown("### Step 1: Automatic CV Data Extraction")
+    uploaded_file = st.file_uploader("Drop candidate resume here (PDF format)", type=["pdf"])
+    
+    if uploaded_file is not None:
+        if ai_model is None:
+            st.error("AI configuration missing. Cannot parse automatically.")
+        else:
+            if st.button("Extract Data with Gemini AI", type="secondary"):
+                with st.spinner("Analyzing resume content structure..."):
+                    try:
+                        parse_prompt = """
+                        Analyze the attached resume PDF document. Extract key information and map it exactly into a raw JSON format. 
+                        Do not include any formatting wrappers, backticks, or '```json' annotations. Return ONLY the raw JSON string matching this pattern:
+                        {
+                            "Candidate Name": "Extract full name",
+                            "Role/Category": "Extract core title or function",
+                            "Location": "Extract city/country if present",
+                            "Budget": "Extract expected/current salary if mentioned, else leave blank",
+                            "Email": "Extract primary contact email",
+                            "Key Skills": "Comma-separated core competencies",
+                            "AI Summary": "Provide a clean 2-sentence summary of candidate credentials"
+                        }
+                        """
+                        response = ai_model.generate_content([
+                            {"mime_type": "application/pdf", "data": uploaded_file.getvalue()},
+                            parse_prompt
+                        ])
+                        
+                        # Sanitize alternative response patterns cleanly
+                        raw_response = response.text.strip()
+                        clean_json_str = raw_response.replace("```json", "").replace("```", "").strip()
+                        extracted_json = json.loads(clean_json_str)
+                        
+                        # Bind extracted metrics directly to UI states
+                        st.session_state["c_name"] = extracted_json.get("Candidate Name", "")
+                        st.session_state["c_role"] = extracted_json.get("Role/Category", "")
+                        st.session_state["c_location"] = extracted_json.get("Location", "")
+                        st.session_state["c_budget"] = extracted_json.get("Budget", "")
+                        st.session_state["c_email"] = extracted_json.get("Email", "")
+                        st.session_state["c_skills"] = extracted_json.get("Key Skills", "")
+                        st.session_state["c_summary"] = extracted_json.get("AI Summary", "")
+                        
+                        st.success("✨ Context pulled! Review, modify or fill missing details below.")
+                        st.rerun()
+                    except Exception as parse_err:
+                        st.error(f"Parsing process hit an anomaly: {str(parse_err)}")
+
+    st.markdown("---")
+    st.markdown("### Step 2: Verify Profile Details (Manual Location & Budget Override)")
+    
+    # Render layout using connected operational states
+    col_in1, col_in2 = st.columns(2)
+    with col_in1:
+        name_input = st.text_input("Candidate Name *", key="c_name")
+        role_input = st.text_input("Role / Functional Category *", key="c_role")
+        location_input = st.text_input("Manual Location Specifics *", key="c_location", help="Provide or adjust geographical assignment.")
+    
+    with col_in2:
+        budget_input = st.text_input("Budget Assignment / CTC Expected *", key="c_budget", help="Specify candidate rate requirements or role constraints.")
+        email_input = st.text_input("Contact Email Address", key="c_email")
+        skills_input = st.text_input("Key Core Skills", key="c_skills")
+        
+    summary_input = st.text_area("Profile Abstract / AI Summary Notes", key="c_summary")
+    
+    if st.button("Commit Profile to Database", type="primary"):
+        if not name_input or not role_input or not location_input or not budget_input:
+            st.error("Cannot execute save: Name, Role, Location, and Budget fields are strictly mandatory.")
+        else:
+            new_candidate = {
+                "Candidate Name": name_input.strip(),
+                "Role/Category": role_input.strip(),
+                "Location": location_input.strip(),
+                "Budget": budget_input.strip(),
+                "Email": email_input.strip(),
+                "Key Skills": skills_input.strip(),
+                "AI Summary": summary_input.strip()
+            }
+            
+            candidate_df = pd.DataFrame([new_candidate])
+            updated_master_df = pd.concat([df, candidate_df], ignore_index=True)
+            
+            if use_gsheets and conn is not None:
+                try:
+                    conn.update(data=updated_master_df)
+                    st.success(f"🚀 Success! '{name_input}' cleanly written to Google Sheets Database.")
+                    
+                    # Clear values to default for fresh entries
+                    for k in state_keys.keys():
+                        st.session_state[k] = ""
+                    st.rerun()
+                except Exception as update_err:
+                    st.error(f"Live sync dropped: {str(update_err)}")
+            else:
+                st.session_state.candidate_db = updated_master_df
+                st.success(f"💾 Saved locally to active browser session storage.")
+                
+                for k in state_keys.keys():
+                    st.session_state[k] = ""
+                st.rerun()
+
+# --- TAB 3: AI TALENT ASSISTANT ---
 with tab_ai:
-    st.subheader("Gemini Operational Assistant")
-    st.markdown("Use this space to draft immediate communications or evaluate vendor parameters.")
+    st.subheader("Recruitment Communication & Screening Copilot")
     
     if ai_model is None:
-        st.error("The AI interface is offline because a valid GEMINI_API_KEY was not provided in Secrets.")
+        st.error("Copilot is offline due to a lack of an active Gemini key.")
     else:
-        # Prompt Quick-Select Templates to streamline operations
-        ai_mode = st.selectbox(
-            "Select an action:",
+        ai_action = st.selectbox(
+            "Choose a workload action:",
             [
-                "Draft an initial Request for Quote (RFQ) Email",
-                "Draft a Lead Time Escalation Notice",
-                "Custom Vendor Analytics Query"
+                "Draft initial Candidate Screening Outreach Email",
+                "Generate Technical Interview Screening Questions",
+                "Review Profile against custom Job Specification"
             ]
         )
         
-        # Pull latest available vendor list for context matching
-        vendor_options = ["None / General Context"]
+        pool_options = ["General Framework"]
         if not df.empty:
-            vendor_options.extend(df["Vendor Name"].unique().tolist())
+            pool_options.extend(df["Candidate Name"].unique().tolist())
             
-        selected_vendor = st.selectbox("Inject Target Vendor context:", vendor_options)
+        target_profile = st.selectbox("Select Target Profile Context:", pool_options)
         
-        # Context compilation engine
-        vendor_context_str = ""
-        if selected_vendor != "None / General Context" and not df.empty:
-            v_data = df[df["Vendor Name"] == selected_vendor].iloc
+        context_block = ""
+        if target_profile != "General Framework" and not df.empty:
+            c_row = df[df["Candidate Name"] == target_profile].iloc[0]
+            context_block = (
+                f"\n--- CANDIDATE DOSSIER ---\n"
+                f"Name: {c_row['Candidate Name']}\n"
+                f"Target Domain: {c_row['Role/Category']}\n"
+                f"Location Assignment: {c_row['Location']}\n"
+                f"Financial Param/Budget: {c_row['Budget']}\n"
+                f"Skills: {c_row['Key Skills']}\n"
+                f"Profile Abstract: {c_row['AI Summary']}\n"
+                f"--------------------------\n"
+            )
+            
+        if "Outreach" in ai_action:
+            prompt_input = st.text_input("Enter company or project specific perks/context:", placeholder="e.g., TechCorp's new automated supply chain platform project")
+            sys_directive = f"You are an executive talent acquisition partner. Write a highly compelling, personalized outreach email based on this candidate's profile data. {context_block}"
+        elif "Questions" in ai_action:
+            prompt_input = st.text_input("Specify critical tech stack components or topics to test:", placeholder="e.g., Python concurrency, data validation pipelines")
+            sys_directive = f"You are a technical vetting manager. Draft 5 nuanced, non-generic screening questions customized to probe this profile's listed skills and target role. {context_block}"
+        else:
+            prompt_input = st.text_area("Paste the baseline Target Job Description below:")
+            sys_directive = f"You are a talent evaluation specialist. Evaluate this profile context against the target job description. List clear Match Strengths, potential Gap Risks, and an onboarding budget verdict based on financial context. {context_block}"
+
+        if st.button("Generate Strategy Output", type="primary"):
+            if not prompt_input:
+                st.warning("Please supply descriptive parameters to proceed.")
+            else:
+                with st.spinner("Compiling insights..."):
+                    try:
+                        final_prompt = f"{sys_directive}\n\nInput Context Parameters: {prompt_input}"
+                        out_res = ai_model.generate_content(final_prompt)
+                        st.markdown("### 📄 Compiled Output")
+                        st.text_area("Output Data Workspace", value=out_res.text, height=450)
+                    except Exception as generic_ai_err:
+                        st.error(f"Generation interrupted: {str(generic_ai_err)}")
